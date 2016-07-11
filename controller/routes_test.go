@@ -35,6 +35,9 @@ func (r *fakeRouter) CreateRoute(route *router.Route) error {
 	now := time.Now()
 	route.CreatedAt = now
 	route.UpdatedAt = now
+	if route.Certificate != nil {
+		route.Certificate.ID = random.UUID()
+	}
 	r.routes[route.ID] = route
 	return nil
 }
@@ -90,7 +93,15 @@ func (r *fakeRouter) ListCerts() ([]*router.Certificate, error) {
 }
 
 func (r *fakeRouter) ListCertRoutes(id string) ([]*router.Route, error) {
-	return nil, nil
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	routes := []*router.Route{}
+	for id, route := range r.routes {
+		if route.Certificate != nil && route.Certificate.ID == id {
+			routes = append(routes, route)
+		}
+	}
+	return routes, nil
 }
 
 type sortedRoutes []*router.Route

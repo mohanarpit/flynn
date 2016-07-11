@@ -9,6 +9,7 @@ import (
 	"github.com/flynn/flynn/controller/client/v1"
 	ct "github.com/flynn/flynn/controller/types"
 	"github.com/flynn/flynn/pkg/random"
+	"github.com/flynn/flynn/pkg/tlscert"
 	"github.com/flynn/flynn/router/types"
 	. "github.com/flynn/go-check"
 	"github.com/graphql-go/handler"
@@ -23,7 +24,7 @@ func (s *S) TestGraphQL(c *C) {
 		},
 	})
 	app := s.createTestApp(c, &ct.App{Meta: map[string]string{"foo": "bar"}})
-	s.c.DeployAppRelease(app.ID, release.ID)
+	s.c.DeployAppRelease(app.ID, release.ID, nil)
 	s.createTestFormation(c, &ct.Formation{ReleaseID: release.ID, AppID: app.ID, Processes: map[string]int{
 		"echo": 1,
 	}})
@@ -33,7 +34,13 @@ func (s *S) TestGraphQL(c *C) {
 	resource, provider := s.provisionTestResource(c, "graphql-test", []string{app.ID})
 
 	route0 := s.createTestRoute(c, app.ID, (&router.TCPRoute{Service: "first-service"}).ToRoute())
-	s.createTestRoute(c, app.ID, (&router.HTTPRoute{Service: "second-service", Domain: "example.com"}).ToRoute())
+	tc, err := tlscert.Generate([]string{"example.com"})
+	c.Assert(err, IsNil)
+	cert := &router.Certificate{
+		Cert: tc.CACert,
+		Key:  tc.PrivateKey,
+	}
+	s.createTestRoute(c, app.ID, (&router.HTTPRoute{Service: "second-service", Domain: "example.com", Certificate: cert}).ToRoute())
 
 	body := &handler.RequestOptions{
 		Query: fmt.Sprintf(`{
@@ -74,8 +81,15 @@ func (s *S) TestGraphQL(c *C) {
 					created_at
 					updated_at
 					domain
-					tls_cert
-					tls_key
+					certificate {
+						id
+						cert
+						key
+						routes {
+							type
+							id
+						}
+					}
 					sticky
 					path
 					port
@@ -170,7 +184,7 @@ func (s *S) TestGraphQL(c *C) {
 	var out map[string]interface{}
 
 	client := s.c.(*v1controller.Client)
-	_, err := client.RawReq("POST", "/graphql", http.Header{"Content-Type": []string{"application/json"}}, body, &out)
+	_, err = client.RawReq("POST", "/graphql", http.Header{"Content-Type": []string{"application/json"}}, body, &out)
 	c.Assert(err, IsNil)
 	data, err := json.MarshalIndent(out, "", "\t")
 	c.Assert(err, IsNil)

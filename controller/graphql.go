@@ -193,6 +193,16 @@ func resourceFieldResolveFunc(fn func(*controllerAPI, *ct.Resource) (interface{}
 	}
 }
 
+func routeCertificateFieldResolveFunc(fn func(*controllerAPI, *router.Certificate) (interface{}, error)) graphql.FieldResolveFn {
+	return func(p graphql.ResolveParams) (interface{}, error) {
+		api := p.Context.Value(apiContextKey).(*controllerAPI)
+		if cert, ok := p.Source.(*router.Certificate); ok {
+			return fn(api, cert)
+		}
+		return nil, nil
+	}
+}
+
 func routeFieldResolveFunc(fn func(*controllerAPI, *router.Route) (interface{}, error)) graphql.FieldResolveFn {
 	return func(p graphql.ResolveParams) (interface{}, error) {
 		api := p.Context.Value(apiContextKey).(*controllerAPI)
@@ -757,6 +767,47 @@ func init() {
 		},
 	})
 
+	routeCertificateObject := graphql.NewObject(graphql.ObjectConfig{
+		Name: "RouteCertificate",
+		Fields: graphql.Fields{
+			"id": &graphql.Field{
+				Type:        graphql.NewNonNull(graphql.String),
+				Description: "UUID of certificate",
+				Resolve: routeCertificateFieldResolveFunc(func(_ *controllerAPI, c *router.Certificate) (interface{}, error) {
+					return c.ID, nil
+				}),
+			},
+			"cert": &graphql.Field{
+				Type:        graphql.NewNonNull(graphql.String),
+				Description: "TLS certificate",
+				Resolve: routeCertificateFieldResolveFunc(func(_ *controllerAPI, c *router.Certificate) (interface{}, error) {
+					return c.Cert, nil
+				}),
+			},
+			"key": &graphql.Field{
+				Type:        graphql.NewNonNull(graphql.String),
+				Description: "TLS private key",
+				Resolve: routeCertificateFieldResolveFunc(func(_ *controllerAPI, c *router.Certificate) (interface{}, error) {
+					return c.Key, nil
+				}),
+			},
+			"created_at": &graphql.Field{
+				Type:        graphqlTimeType,
+				Description: "Time certificate was created at",
+				Resolve: routeCertificateFieldResolveFunc(func(_ *controllerAPI, c *router.Certificate) (interface{}, error) {
+					return c.CreatedAt, nil
+				}),
+			},
+			"updated_at": &graphql.Field{
+				Type:        graphqlTimeType,
+				Description: "Time certificate was last updated",
+				Resolve: routeCertificateFieldResolveFunc(func(_ *controllerAPI, c *router.Certificate) (interface{}, error) {
+					return c.UpdatedAt, nil
+				}),
+			},
+		},
+	})
+
 	routeObject := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Route",
 		Fields: graphql.Fields{
@@ -816,20 +867,6 @@ func init() {
 					return r.Domain, nil
 				}),
 			},
-			"tls_cert": &graphql.Field{
-				Type:        graphql.String,
-				Description: "TLS public certificate of route",
-				Resolve: routeFieldResolveFunc(func(_ *controllerAPI, r *router.Route) (interface{}, error) {
-					return r.TLSCert, nil
-				}),
-			},
-			"tls_key": &graphql.Field{
-				Type:        graphql.String,
-				Description: "TLS private key of route",
-				Resolve: routeFieldResolveFunc(func(_ *controllerAPI, r *router.Route) (interface{}, error) {
-					return r.TLSKey, nil
-				}),
-			},
 			"sticky": &graphql.Field{
 				Type:        graphql.Boolean,
 				Description: "Use sticky sessions for route when true (HTTP routes only)",
@@ -851,6 +888,16 @@ func init() {
 					return r.Port, nil
 				}),
 			},
+			"certificate": &graphql.Field{
+				Type:        routeCertificateObject,
+				Description: "TLS certificate for route",
+				Resolve: routeFieldResolveFunc(func(_ *controllerAPI, r *router.Route) (interface{}, error) {
+					if r.Certificate == nil {
+						return nil, nil
+					}
+					return r.Certificate, nil
+				}),
+			},
 			"app": &graphql.Field{
 				Type:        appObject,
 				Description: "App route belongs to",
@@ -863,6 +910,14 @@ func init() {
 				}),
 			},
 		},
+	})
+
+	routeCertificateObject.AddFieldConfig("routes", &graphql.Field{
+		Type:        graphql.NewList(routeObject),
+		Description: "Routes using certificate",
+		Resolve: routeCertificateFieldResolveFunc(func(api *controllerAPI, c *router.Certificate) (interface{}, error) {
+			return api.routerc.ListCertRoutes(c.ID)
+		}),
 	})
 
 	eventObject := graphql.NewObject(graphql.ObjectConfig{
