@@ -190,8 +190,14 @@ func (r *Repository) Mount(layer *Layer) (string, error) {
 	if err := os.MkdirAll(dst, 0700); err != nil {
 		return "", err
 	}
-	if out, err := exec.Command("mount", "-t", "squashfs", src, dst).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("error mounting layer: %s: %s", err, out)
+
+	loopDev, err := loopMount(src)
+	if err != nil {
+		return "", err
+	}
+
+	if err := syscall.Mount(loopDev, dst, "squashfs", 0, ""); err != nil {
+		return "", err
 	}
 	return dst, nil
 }
@@ -211,6 +217,44 @@ func isMounted(path string) (bool, error) {
 		}
 	}
 	return false, s.Err()
+}
+
+const (
+	LOOP_CTL_GET_FREE = 0x4C82
+	LOOP_SET_FD       = 0x4C00
+)
+
+func loopMount(src string) (string, error) {
+	ctrl, err := os.OpenFile("/dev/loop-control", os.O_RDWR, 0)
+	if err != nil {
+		return "", err
+	}
+	defer ctrl.Close()
+
+	index, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ctrl.Fd(), uintptr(LOOP_CTL_GET_FREE), 0)
+	if errno != 0 {
+		return "", fmt.Errorf("error allocating loop device: %s", err)
+	}
+	path := fmt.Sprintf("/dev/loop%d", index)
+
+	loop, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return "", err
+	}
+	defer loop.Close()
+
+	f, err := os.OpenFile(src, os.O_RDWR, 0)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	_, _, errno = syscall.Syscall(syscall.SYS_IOCTL, loop.Fd(), uintptr(LOOP_SET_FD), f.Fd())
+	if errno != 0 {
+		return "", fmt.Errorf("error setting loop device backing file: %s", err)
+	}
+
+	return path, nil
 }
 
 type Version string
