@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/flynn/flynn/pkg/random"
 	"github.com/tent/canonical-json-go"
 )
 
@@ -145,30 +146,23 @@ func (r *Repository) Checkout(name string) (string, error) {
 		mounts[len(image.Layers)-i-1] = path
 	}
 
-	upperDir, err := ioutil.TempDir(r.tmpDir, "upper-")
-	if err != nil {
+	workDir := filepath.Join(r.tmpDir, "work-"+random.UUID())
+	if err := os.Mkdir(workDir, 0755); err != nil {
 		return "", err
 	}
-	workDir, err := ioutil.TempDir(r.tmpDir, "work-")
-	if err != nil {
-		os.RemoveAll(upperDir)
-		return "", err
-	}
-	mergedDir, err := ioutil.TempDir(r.tmpDir, "merged-")
-	if err != nil {
+	upperDir := filepath.Join(r.tmpDir, "upper-"+random.UUID())
+	if err := os.Mkdir(upperDir, 0755); err != nil {
 		os.RemoveAll(workDir)
-		os.RemoveAll(upperDir)
 		return "", err
 	}
 
 	mountData := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", strings.Join(mounts, ":"), upperDir, workDir)
-	if err := syscall.Mount("overlay", mergedDir, "overlay", 0, mountData); err != nil {
-		os.RemoveAll(mergedDir)
+	if err := syscall.Mount("overlay", upperDir, "overlay", 0, mountData); err != nil {
 		os.RemoveAll(workDir)
 		os.RemoveAll(upperDir)
 		return "", err
 	}
-	return mergedDir, nil
+	return upperDir, nil
 }
 
 func LoadImage(manifest string) (*Image, error) {
