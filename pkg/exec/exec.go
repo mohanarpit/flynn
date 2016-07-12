@@ -85,6 +85,10 @@ func DockerImage(uri string) host.Artifact {
 	return host.Artifact{Type: host.ArtifactTypeDocker, URI: uri}
 }
 
+func FlynnImage(uri string) host.Artifact {
+	return host.Artifact{Type: host.ArtifactTypeFlynn, URI: uri}
+}
+
 func Command(artifact host.Artifact, cmd ...string) *Cmd {
 	return &Cmd{ImageArtifact: artifact, Cmd: cmd}
 }

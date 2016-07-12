@@ -25,6 +25,7 @@ import (
 	"github.com/docker/libnetwork/netutils"
 	"github.com/flynn/flynn/discoverd/client"
 	"github.com/flynn/flynn/host/containerinit"
+	"github.com/flynn/flynn/host/image"
 	"github.com/flynn/flynn/host/logmux"
 	"github.com/flynn/flynn/host/resource"
 	"github.com/flynn/flynn/host/types"
@@ -83,6 +84,11 @@ func NewLibcontainerBackend(state *State, vman *volumemanager.Manager, bridgeNam
 		return nil, err
 	}
 
+	imageRepo, err := image.NewRepository("/var/lib/flynn/image")
+	if err != nil {
+		return nil, err
+	}
+
 	if err := setupCGroups(partitionCGroups); err != nil {
 		return nil, err
 	}
@@ -93,6 +99,7 @@ func NewLibcontainerBackend(state *State, vman *volumemanager.Manager, bridgeNam
 		state:               state,
 		vman:                vman,
 		pinkerton:           pinkertonCtx,
+		imageRepo:           imageRepo,
 		logStreams:          make(map[string]map[string]*logmux.LogStream),
 		containers:          make(map[string]*Container),
 		defaultEnv:          make(map[string]string),
@@ -113,6 +120,7 @@ type LibcontainerBackend struct {
 	state     *State
 	vman      *volumemanager.Manager
 	pinkerton *pinkerton.Context
+	imageRepo *image.Repository
 	ipalloc   *ipallocator.IPAllocator
 
 	ifaceMTU   int
@@ -335,7 +343,7 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 		return nil
 	}
 
-	log.Info("starting job", "job.artifact.uri", job.ImageArtifact.URI, "job.cmd", job.Config.Cmd)
+	log.Info("starting job", "job.artifact.type", job.ImageArtifact.Type, "job.artifact.uri", job.ImageArtifact.URI, "job.cmd", job.Config.Cmd)
 
 	defer func() {
 		if err != nil {
@@ -389,17 +397,47 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 		}
 	}()
 
-	log.Info("pulling image")
-	artifactURI, err := l.resolveDiscoverdURI(job.ImageArtifact.URI)
+	imageID, err := pinkerton.ImageID(job.ImageArtifact.URI)
 	if err != nil {
-		log.Error("error resolving artifact URI", "err", err)
+		log.Error("error getting artifact image ID", "err", err)
 		return err
 	}
-	// TODO(lmars): stream pull progress (maybe to the app log?)
-	imageID, err := l.pinkerton.PullDocker(artifactURI, ioutil.Discard)
-	if err != nil {
-		log.Error("error pulling image", "err", err)
-		return err
+
+	var rootPath string
+	switch job.ImageArtifact.Type {
+	case host.ArtifactTypeDocker:
+		log.Info("pulling image")
+		artifactURI, err := l.resolveDiscoverdURI(job.ImageArtifact.URI)
+		if err != nil {
+			log.Error("error resolving artifact URI", "err", err)
+			return err
+		}
+		// TODO(lmars): stream pull progress (maybe to the app log?)
+		imageID, err = l.pinkerton.PullDocker(artifactURI, ioutil.Discard)
+		if err != nil {
+			log.Error("error pulling image", "err", err)
+			return err
+		}
+
+		log.Info("checking out image")
+		// creating an AUFS mount can fail intermittently with EINVAL, so try a
+		// few times (see https://github.com/flynn/flynn/issues/2044)
+		for start := time.Now(); time.Since(start) < time.Second; time.Sleep(50 * time.Millisecond) {
+			rootPath, err = l.pinkerton.Checkout(job.ID, imageID)
+			if err == nil || !strings.HasSuffix(err.Error(), "invalid argument") {
+				break
+			}
+		}
+		if err != nil {
+			log.Error("error checking out image", "err", err)
+			return err
+		}
+	case host.ArtifactTypeFlynn:
+		rootPath, err = l.imageRepo.Checkout(imageID)
+		if err != nil {
+			log.Error("error checking out image", "err", err)
+			return err
+		}
 	}
 
 	log.Info("reading image config")
@@ -409,20 +447,6 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 		return err
 	}
 
-	log.Info("checking out image")
-	var rootPath string
-	// creating an AUFS mount can fail intermittently with EINVAL, so try a
-	// few times (see https://github.com/flynn/flynn/issues/2044)
-	for start := time.Now(); time.Since(start) < time.Second; time.Sleep(50 * time.Millisecond) {
-		rootPath, err = l.pinkerton.Checkout(job.ID, imageID)
-		if err == nil || !strings.HasSuffix(err.Error(), "invalid argument") {
-			break
-		}
-	}
-	if err != nil {
-		log.Error("error checking out image", "err", err)
-		return err
-	}
 	container.RootPath = rootPath
 
 	config := &configs.Config{

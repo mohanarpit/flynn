@@ -190,6 +190,7 @@ type ArtifactType string
 const (
 	ArtifactTypeDocker ArtifactType = "docker"
 	ArtifactTypeFile   ArtifactType = "file"
+	ArtifactTypeFlynn  ArtifactType = "flynn"
 )
 
 type Host struct {
