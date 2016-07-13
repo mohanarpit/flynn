@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/flynn/flynn/controller/client/v1"
+	"github.com/flynn/flynn/controller/client/v2"
 	ct "github.com/flynn/flynn/controller/types"
 	"github.com/flynn/flynn/pkg/random"
 	"github.com/flynn/flynn/pkg/tlscert"
@@ -16,6 +17,21 @@ import (
 )
 
 func (s *S) TestGraphQL(c *C) {
+	v1client := s.c.(*v1controller.Client)
+	v2client := v2controller.New(v1client)
+
+	app := s.createTestApp(c, &ct.App{Meta: map[string]string{"foo": "bar"}})
+	_, provider := s.provisionTestResource(c, "graphql-test", []string{app.ID})
+
+	v1res, err := v1client.GetProvider(provider.ID)
+	c.Assert(err, IsNil)
+	v2res, err := v2client.GetProvider(provider.ID)
+	c.Assert(err, IsNil)
+	c.Assert(v1res, DeepEquals, provider)
+	c.Assert(v2res, DeepEquals, provider)
+}
+
+func (s *S) _TestGraphQL(c *C) {
 	release := s.createTestRelease(c, &ct.Release{
 		Meta: map[string]string{"biz": "baz"},
 		Env:  map[string]string{"HELLO": "WORLD"},

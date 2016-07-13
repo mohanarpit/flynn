@@ -123,6 +123,16 @@ func formationFieldResolveFunc(fn func(*controllerAPI, *ct.Formation) (interface
 	}
 }
 
+func expandedFormationFieldResolveFunc(fn func(*controllerAPI, *ct.ExpandedFormation) (interface{}, error)) graphql.FieldResolveFn {
+	return func(p graphql.ResolveParams) (interface{}, error) {
+		api := p.Context.Value(apiContextKey).(*controllerAPI)
+		if formation, ok := p.Source.(*ct.ExpandedFormation); ok {
+			return fn(api, formation)
+		}
+		return nil, nil
+	}
+}
+
 func artifactFieldResolveFunc(fn func(*controllerAPI, *ct.Artifact) (interface{}, error)) graphql.FieldResolveFn {
 	return func(p graphql.ResolveParams) (interface{}, error) {
 		api := p.Context.Value(apiContextKey).(*controllerAPI)
@@ -229,10 +239,8 @@ func listArtifacts(api *controllerAPI, artifactIDs []string) ([]*ct.Artifact, er
 		return nil, err
 	}
 	artifacts := make([]*ct.Artifact, len(artifactMap))
-	i := 0
-	for _, a := range artifactMap {
-		artifacts[i] = a
-		i++
+	for i, id := range artifactIDs {
+		artifacts[i] = artifactMap[id]
 	}
 	return artifacts, nil
 }
@@ -339,14 +347,10 @@ func init() {
 				Type:        graphql.NewList(artifactObject),
 				Description: "Artifacts for release",
 				Resolve: releaseFieldResolveFunc(func(api *controllerAPI, release *ct.Release) (interface{}, error) {
-					artifactIDs := make([]string, 0, len(release.ArtifactIDs)+1)
-					if release.LegacyArtifactID != "" {
-						artifactIDs = append(artifactIDs, release.LegacyArtifactID)
+					if len(release.ArtifactIDs) == 0 {
+						return []*ct.Artifact{}, nil
 					}
-					for _, id := range release.ArtifactIDs {
-						artifactIDs = append(artifactIDs, id)
-					}
-					return listArtifacts(api, artifactIDs)
+					return listArtifacts(api, release.ArtifactIDs)
 				}),
 			},
 			"image_artifact": &graphql.Field{
@@ -368,6 +372,13 @@ func init() {
 				Description: "Env for release",
 				Resolve: releaseFieldResolveFunc(func(_ *controllerAPI, release *ct.Release) (interface{}, error) {
 					return release.Env, nil
+				}),
+			},
+			"processes": &graphql.Field{
+				Type:        processesObjectType,
+				Description: "Processes included in deployment",
+				Resolve: releaseFieldResolveFunc(func(_ *controllerAPI, r *ct.Release) (interface{}, error) {
+					return r.Processes, nil
 				}),
 			},
 			"meta": &graphql.Field{
@@ -443,7 +454,12 @@ func init() {
 				Type:        releaseObject,
 				Description: "Current release for app",
 				Resolve: appFieldResolveFunc(func(api *controllerAPI, app *ct.App) (interface{}, error) {
-					return api.appRepo.GetRelease(app.ID)
+					release, err := api.appRepo.GetRelease(app.ID)
+					if err == ErrNotFound {
+						// not all apps have a release
+						return nil, nil
+					}
+					return release, err
 				}),
 			},
 			"releases": &graphql.Field{
@@ -477,21 +493,33 @@ func init() {
 				Type:        appObject,
 				Description: "App deployment belongs to",
 				Resolve: deploymentFieldResolveFunc(func(api *controllerAPI, d *ct.Deployment) (interface{}, error) {
-					return api.appRepo.Get(d.AppID)
+					app, err := api.appRepo.Get(d.AppID)
+					if err == ErrNotFound {
+						return nil, nil
+					}
+					return app, err
 				}),
 			},
 			"old_release": &graphql.Field{
 				Type:        releaseObject,
 				Description: "Old release",
 				Resolve: deploymentFieldResolveFunc(func(api *controllerAPI, d *ct.Deployment) (interface{}, error) {
-					return api.releaseRepo.Get(d.OldReleaseID)
+					r, err := api.releaseRepo.Get(d.OldReleaseID)
+					if err == ErrNotFound {
+						return nil, nil
+					}
+					return r, err
 				}),
 			},
 			"new_release": &graphql.Field{
 				Type:        releaseObject,
 				Description: "New release",
 				Resolve: deploymentFieldResolveFunc(func(api *controllerAPI, d *ct.Deployment) (interface{}, error) {
-					return api.releaseRepo.Get(d.NewReleaseID)
+					r, err := api.releaseRepo.Get(d.NewReleaseID)
+					if err == ErrNotFound {
+						return nil, nil
+					}
+					return r, err
 				}),
 			},
 			"strategy": &graphql.Field{
@@ -972,6 +1000,61 @@ func init() {
 		},
 	})
 
+	expandedFormationObject := graphql.NewObject(graphql.ObjectConfig{
+		Name: "ExpandedFormation",
+		Fields: graphql.Fields{
+			"app": &graphql.Field{
+				Type:        appObject,
+				Description: "App formation belongs to",
+				Resolve: expandedFormationFieldResolveFunc(func(api *controllerAPI, f *ct.ExpandedFormation) (interface{}, error) {
+					return api.appRepo.Get(f.App.ID)
+				}),
+			},
+			"release": &graphql.Field{
+				Type:        releaseObject,
+				Description: "Release formation belongs to",
+				Resolve: expandedFormationFieldResolveFunc(func(api *controllerAPI, f *ct.ExpandedFormation) (interface{}, error) {
+					return api.releaseRepo.Get(f.Release.ID)
+				}),
+			},
+			"image_artifact": &graphql.Field{
+				Type:        artifactObject,
+				Description: "Image artifact",
+				Resolve: expandedFormationFieldResolveFunc(func(api *controllerAPI, f *ct.ExpandedFormation) (interface{}, error) {
+					return f.ImageArtifact, nil
+				}),
+			},
+			"file_artifacts": &graphql.Field{
+				Type:        graphql.NewList(artifactObject),
+				Description: "File artifacts",
+				Resolve: expandedFormationFieldResolveFunc(func(api *controllerAPI, f *ct.ExpandedFormation) (interface{}, error) {
+					return f.FileArtifacts, nil
+				}),
+			},
+			"processes": &graphql.Field{
+				Type:        processesObjectType,
+				Description: "Processes",
+				Resolve: expandedFormationFieldResolveFunc(func(_ *controllerAPI, f *ct.ExpandedFormation) (interface{}, error) {
+					return f.Processes, nil
+				}),
+			},
+			"tags": &graphql.Field{
+				Type:        tagsObjectType,
+				Description: "Tags",
+				Resolve: expandedFormationFieldResolveFunc(func(_ *controllerAPI, f *ct.ExpandedFormation) (interface{}, error) {
+					return f.Tags, nil
+				}),
+			},
+			"updated_at": &graphql.Field{
+				Type:        graphqlTimeType,
+				Description: "Time formation was last updated",
+				Resolve: expandedFormationFieldResolveFunc(func(_ *controllerAPI, f *ct.ExpandedFormation) (interface{}, error) {
+					return f.UpdatedAt, nil
+				}),
+			},
+		},
+	})
+
 	formationObject.AddFieldConfig("app", &graphql.Field{
 		Type:        appObject,
 		Description: "App formation belongs to",
@@ -987,6 +1070,13 @@ func init() {
 		}),
 	})
 
+	appObject.AddFieldConfig("resources", &graphql.Field{
+		Type:        graphql.NewList(resourceObject),
+		Description: "Resources for app",
+		Resolve: appFieldResolveFunc(func(api *controllerAPI, app *ct.App) (interface{}, error) {
+			return api.resourceRepo.AppList(app.ID)
+		}),
+	})
 	appObject.AddFieldConfig("deployments", &graphql.Field{
 		Type:        graphql.NewList(deploymentObject),
 		Description: "Deployments for app",
@@ -1101,6 +1191,12 @@ func init() {
 						return api.appRepo.Get(p.Args["id"].(string))
 					}),
 				},
+				"apps": &graphql.Field{
+					Type: graphql.NewList(appObject),
+					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
+						return api.appRepo.List()
+					}),
+				},
 				"artifact": &graphql.Field{
 					Type: artifactObject,
 					Args: graphql.FieldConfigArgument{
@@ -1111,6 +1207,12 @@ func init() {
 					},
 					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
 						return api.artifactRepo.Get(p.Args["id"].(string))
+					}),
+				},
+				"artifacts": &graphql.Field{
+					Type: graphql.NewList(artifactObject),
+					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
+						return api.artifactRepo.List()
 					}),
 				},
 				"release": &graphql.Field{
@@ -1125,6 +1227,12 @@ func init() {
 						return api.releaseRepo.Get(p.Args["id"].(string))
 					}),
 				},
+				"releases": &graphql.Field{
+					Type: graphql.NewList(releaseObject),
+					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
+						return api.releaseRepo.List()
+					}),
+				},
 				"formation": &graphql.Field{
 					Type: formationObject,
 					Args: graphql.FieldConfigArgument{
@@ -1136,7 +1244,35 @@ func init() {
 						},
 					},
 					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
-						return api.formationRepo.Get(p.Args["app"].(string), p.Args["release"].(string))
+						app, err := api.appRepo.Get(p.Args["app"].(string))
+						if err != nil {
+							return nil, err
+						}
+						return api.formationRepo.Get(app.(*ct.App).ID, p.Args["release"].(string))
+					}),
+				},
+				"active_formations": &graphql.Field{
+					Type: graphql.NewList(expandedFormationObject),
+					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
+						return api.formationRepo.ListActive()
+					}),
+				},
+				"expanded_formation": &graphql.Field{
+					Type: expandedFormationObject,
+					Args: graphql.FieldConfigArgument{
+						"app": &graphql.ArgumentConfig{
+							Type: graphql.NewNonNull(graphql.String),
+						},
+						"release": &graphql.ArgumentConfig{
+							Type: graphql.NewNonNull(graphql.String),
+						},
+					},
+					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
+						app, err := api.appRepo.Get(p.Args["app"].(string))
+						if err != nil {
+							return nil, err
+						}
+						return api.formationRepo.GetExpanded(app.(*ct.App).ID, p.Args["release"].(string))
 					}),
 				},
 				"deployment": &graphql.Field{
@@ -1173,6 +1309,12 @@ func init() {
 					},
 					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
 						return api.providerRepo.Get(p.Args["id"].(string))
+					}),
+				},
+				"providers": &graphql.Field{
+					Type: graphql.NewList(providerObject),
+					Resolve: wrapResolveFunc(func(api *controllerAPI, p graphql.ResolveParams) (interface{}, error) {
+						return api.providerRepo.List()
 					}),
 				},
 				"resource": &graphql.Field{

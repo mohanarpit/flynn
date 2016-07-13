@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/flynn/flynn/host/resource"
@@ -11,6 +12,8 @@ import (
 	"github.com/flynn/flynn/pkg/tlscert"
 	"github.com/flynn/flynn/router/types"
 )
+
+var ErrNotFound = errors.New("controller: resource not found")
 
 const RouteParentRefPrefix = "controller/apps/"
 
@@ -322,6 +325,25 @@ type NotFoundError struct {
 
 func (n NotFoundError) Error() string {
 	return fmt.Sprintf("resource not found: %s", n.Resource)
+}
+
+type GraphQLErrors []*GraphQLError
+
+func (e GraphQLErrors) Error() string {
+	messages := make([]string, len(e))
+	for i, err := range e {
+		messages[i] = err.Error()
+	}
+	return strings.Join(messages, "\n")
+}
+
+type GraphQLError struct {
+	Message   string      `json:"message"`
+	Locations interface{} `json:"locations"`
+}
+
+func (e *GraphQLError) Error() string {
+	return e.Message
 }
 
 // SSELogChunk is used as a data wrapper for the `GET /apps/:apps_id/log` SSE stream
