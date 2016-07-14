@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"syscall"
 
 	"github.com/docker/docker/pkg/archive"
 	ct "github.com/flynn/flynn/controller/types"
@@ -89,7 +90,29 @@ func (b *Builder) Build(name string) error {
 }
 
 func (b *Builder) CreateLayer(ids []string) (*ct.ImageLayer, error) {
-	// TODO: don't create the layer if it already exists
+	imageID := ids[len(ids)-1]
+
+	lock, err := os.OpenFile(fmt.Sprintf("/var/lib/flynn/image/tmp/layer-%s.json.lock", imageID), os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	defer os.Remove(lock.Name())
+
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+
+	path := fmt.Sprintf("/var/lib/flynn/image/tmp/layer-%s.json", imageID)
+	f, err := os.Open(path)
+	if err == nil {
+		defer f.Close()
+		var layer ct.ImageLayer
+		return &layer, json.NewDecoder(f).Decode(&layer)
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
 
 	dir, err := ioutil.TempDir("", "docker-layer-")
 	if err != nil {
@@ -111,5 +134,18 @@ func (b *Builder) CreateLayer(ids []string) (*ct.ImageLayer, error) {
 		}
 	}
 
-	return b.repo.CreateLayer(dir)
+	layer, err := b.repo.CreateLayer(dir)
+	if err != nil {
+		return nil, err
+	}
+	f, err = os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(&layer); err != nil {
+		os.Remove(path)
+		return nil, err
+	}
+	return layer, nil
 }
