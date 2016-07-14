@@ -42,6 +42,7 @@
     },
     "artifact": {
       "type": "flynn",
+      "uri": "$image_repository?target=/image/manifests/$image_id[discoverd].json",
       "manifest": $image_manifest[discoverd]
     },
     "processes": {
@@ -70,7 +71,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/flannel&id=$image_id[flannel]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[flannel].json",
+      "manifest": $image_manifest[flannel]
     },
     "processes": {
       "app": 1
@@ -121,7 +123,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/postgresql&id=$image_id[postgresql]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[postgresql].json",
+      "manifest": $image_manifest[postgresql]
     },
     "processes": {
       "postgres": 3,
@@ -203,7 +206,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/controller&id=$image_id[controller]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[controller].json",
+      "manifest": $image_manifest[controller]
     },
     "processes": {
       "web": 1
@@ -294,7 +298,7 @@
       "env": {
         "FLYNN_REDIS": "redis",
         "CONTROLLER_KEY": "{{ (index .StepData \"controller-key\").Data }}",
-        "REDIS_IMAGE_URI": "$image_repository?name=flynn/redis&id=$image_id[redis]"
+        "REDIS_IMAGE_URI": "$image_repository?target=/image/manifests/$image_id[redis].json"
       },
       "processes": {
         "web": {
@@ -305,7 +309,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/redis&id=$image_id[redis]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[redis].json",
+      "manifest": $image_manifest[redis]
     },
     "processes": {
       "web": 2
@@ -359,7 +364,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/mariadb&id=$image_id[mariadb]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[mariadb].json",
+      "manifest": $image_manifest[mariadb]
     },
     "processes": {
       "mariadb": 0,
@@ -414,7 +420,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/mongodb&id=$image_id[mongodb]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[mongodb].json",
+      "manifest": $image_manifest[mongodb]
     },
     "processes": {
       "mongodb": 0,
@@ -436,7 +443,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/blobstore&id=$image_id[blobstore]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[blobstore].json",
+      "manifest": $image_manifest[blobstore]
     },
     "release": {
       "processes": {
@@ -460,7 +468,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/router&id=$image_id[router]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[router].json",
+      "manifest": $image_manifest[router]
     },
     "release": {
       "env": {
@@ -491,13 +500,14 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/gitreceive&id=$image_id[gitreceive]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[gitreceive].json",
+      "manifest": $image_manifest[gitreceive]
     },
     "release": {
       "env": {
         "CONTROLLER_KEY": "{{ (index .StepData \"controller-key\").Data }}",
-        "SLUGBUILDER_IMAGE_URI": "$image_repository?name=flynn/slugbuilder&id=$image_id[slugbuilder]",
-        "SLUGRUNNER_IMAGE_URI": "$image_repository?name=flynn/slugrunner&id=$image_id[slugrunner]"
+        "SLUGBUILDER_IMAGE_URI": "$image_repository?target=/image/manifests/$image_id[slugbuilder].json",
+        "SLUGRUNNER_IMAGE_URI": "$image_repository?target=/image/manifests/$image_id[slugrunner].json"
       },
       "processes": {
         "app": {
@@ -530,7 +540,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/docker-receive&id=$image_id[docker-receive]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[docker-receive].json",
+      "manifest": $image_manifest[docker-receive]
     },
     "release": {
       "env": {
@@ -607,7 +618,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/logaggregator&id=$image_id[logaggregator]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[logaggregator].json",
+      "manifest": $image_manifest[logaggregator]
     },
     "release": {
       "processes": {
@@ -633,13 +645,14 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/taffy&id=$image_id[taffy]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[taffy].json",
+      "manifest": $image_manifest[taffy]
     },
     "release": {
       "env": {
         "CONTROLLER_KEY": "{{ (index .StepData \"controller-key\").Data }}",
-        "SLUGBUILDER_IMAGE_URI": "$image_repository?name=flynn/slugbuilder&id=$image_id[slugbuilder]",
-        "SLUGRUNNER_IMAGE_URI": "$image_repository?name=flynn/slugrunner&id=$image_id[slugrunner]"
+        "SLUGBUILDER_IMAGE_URI": "$image_repository?target=/image/manifests/$image_id[slugbuilder].json",
+        "SLUGRUNNER_IMAGE_URI": "$image_repository?target=/image/manifests/$image_id[slugrunner].json"
       }
     }
   },
@@ -657,7 +670,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/dashboard&id=$image_id[dashboard]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[dashboard].json",
+      "manifest": $image_manifest[dashboard]
     },
     "release": {
       "env": {
@@ -708,7 +722,8 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/status&id=$image_id[status]"
+      "uri": "$image_repository?target=/image/manifests/$image_id[status].json",
+      "manifest": $image_manifest[discoverd]
     },
     "release": {
       "env": {
