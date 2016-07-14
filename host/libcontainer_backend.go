@@ -26,7 +26,6 @@ import (
 	"github.com/docker/libnetwork/netutils"
 	"github.com/flynn/flynn/discoverd/client"
 	"github.com/flynn/flynn/host/containerinit"
-	"github.com/flynn/flynn/host/image"
 	"github.com/flynn/flynn/host/logmux"
 	"github.com/flynn/flynn/host/resource"
 	"github.com/flynn/flynn/host/types"
@@ -85,11 +84,6 @@ func NewLibcontainerBackend(state *State, vman *volumemanager.Manager, bridgeNam
 		return nil, err
 	}
 
-	imageRepo, err := image.NewRepository("/var/lib/flynn/image")
-	if err != nil {
-		return nil, err
-	}
-
 	if err := setupCGroups(partitionCGroups); err != nil {
 		return nil, err
 	}
@@ -100,7 +94,6 @@ func NewLibcontainerBackend(state *State, vman *volumemanager.Manager, bridgeNam
 		state:               state,
 		vman:                vman,
 		pinkerton:           pinkertonCtx,
-		imageRepo:           imageRepo,
 		logStreams:          make(map[string]map[string]*logmux.LogStream),
 		containers:          make(map[string]*Container),
 		defaultEnv:          make(map[string]string),
@@ -121,7 +114,6 @@ type LibcontainerBackend struct {
 	state     *State
 	vman      *volumemanager.Manager
 	pinkerton *pinkerton.Context
-	imageRepo *image.Repository
 	ipalloc   *ipallocator.IPAllocator
 
 	ifaceMTU   int

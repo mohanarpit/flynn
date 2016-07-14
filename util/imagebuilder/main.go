@@ -1,17 +1,20 @@
 package main
 
 import (
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 
 	"github.com/docker/docker/pkg/archive"
 	ct "github.com/flynn/flynn/controller/types"
-	"github.com/flynn/flynn/host/image"
 	"github.com/flynn/flynn/pinkerton"
 )
 
@@ -39,22 +42,28 @@ func build(name string) error {
 		return err
 	}
 
-	repo, err := image.NewRepository("/var/lib/flynn/image")
-	if err != nil {
-		return err
+	root := "/var/lib/flynn/image"
+	layerDir := filepath.Join(root, "layers")
+	tmpDir := filepath.Join(root, "tmp")
+	for _, dir := range []string{root, layerDir, tmpDir} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return err
+		}
 	}
 
 	builder := &Builder{
-		context: context,
-		repo:    repo,
+		context:  context,
+		layerDir: layerDir,
+		tmpDir:   tmpDir,
 	}
 
 	return builder.Build(name)
 }
 
 type Builder struct {
-	context *pinkerton.Context
-	repo    *image.Repository
+	context  *pinkerton.Context
+	layerDir string
+	tmpDir   string
 }
 
 func (b *Builder) Build(name string) error {
@@ -89,23 +98,33 @@ func (b *Builder) Build(name string) error {
 	return json.NewEncoder(os.Stdout).Encode(image)
 }
 
+// CreateLayer creates a squashfs layer from a docker layer ID chain by
+// creating a temporary directory, applying the relevant diffs then calling
+// mksquashfs.
+//
+// Each squashfs layer is serialized as JSON and cached in a temporary file to
+// avoid regenerating existing layers, with access wrapped with a lock file in
+// case multiple images are being built at the same time.
 func (b *Builder) CreateLayer(ids []string) (*ct.ImageLayer, error) {
 	imageID := ids[len(ids)-1]
+	layerCache := filepath.Join(b.tmpDir, fmt.Sprintf("layer-%s.json", imageID))
 
-	lock, err := os.OpenFile(fmt.Sprintf("/var/lib/flynn/image/tmp/layer-%s.json.lock", imageID), os.O_CREATE|os.O_RDWR, 0644)
+	// acquire the lock file using flock(2) to synchronize access to the
+	// layer cache
+	lockPath := layerCache + ".lock"
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Close()
 	defer os.Remove(lock.Name())
-
+	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return nil, err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 
-	path := fmt.Sprintf("/var/lib/flynn/image/tmp/layer-%s.json", imageID)
-	f, err := os.Open(path)
+	// if the layer cache exists, deserialize and return
+	f, err := os.Open(layerCache)
 	if err == nil {
 		defer f.Close()
 		var layer ct.ImageLayer
@@ -114,12 +133,12 @@ func (b *Builder) CreateLayer(ids []string) (*ct.ImageLayer, error) {
 		return nil, err
 	}
 
+	// apply the docker layer diffs to a temporary directory
 	dir, err := ioutil.TempDir("", "docker-layer-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-
 	for i, id := range ids {
 		parent := ""
 		if i > 0 {
@@ -134,18 +153,54 @@ func (b *Builder) CreateLayer(ids []string) (*ct.ImageLayer, error) {
 		}
 	}
 
-	layer, err := b.repo.CreateLayer(dir)
+	// create the squashfs layer
+	layer, err := b.mksquashfs(dir)
 	if err != nil {
 		return nil, err
 	}
-	f, err = os.Create(path)
+
+	// write the serialized layer to the cache file
+	f, err = os.Create(layerCache)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	if err := json.NewEncoder(f).Encode(&layer); err != nil {
-		os.Remove(path)
+		os.Remove(layerCache)
 		return nil, err
 	}
 	return layer, nil
+}
+
+func (b *Builder) mksquashfs(dir string) (*ct.ImageLayer, error) {
+	tmp, err := ioutil.TempFile(b.tmpDir, "squashfs-")
+	if err != nil {
+		return nil, err
+	}
+	defer tmp.Close()
+
+	if out, err := exec.Command("mksquashfs", dir, tmp.Name(), "-noappend").CombinedOutput(); err != nil {
+		os.Remove(tmp.Name())
+		return nil, fmt.Errorf("mksquashfs error: %s: %s", err, out)
+	}
+
+	h := sha512.New()
+	length, err := io.Copy(h, tmp)
+	if err != nil {
+		os.Remove(tmp.Name())
+		return nil, err
+	}
+
+	sha512 := hex.EncodeToString(h.Sum(nil))
+	dst := filepath.Join(b.layerDir, sha512)
+	if err := os.Rename(tmp.Name(), dst); err != nil {
+		return nil, err
+	}
+
+	return &ct.ImageLayer{
+		Type:       ct.ImageLayerTypeSquashfs,
+		Length:     length,
+		Mountpoint: "/",
+		Hashes:     map[string]string{"sha512": sha512},
+	}, nil
 }
