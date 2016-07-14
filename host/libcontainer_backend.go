@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -397,55 +398,18 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 		}
 	}()
 
-	imageID, err := pinkerton.ImageID(job.ImageArtifact.URI)
-	if err != nil {
-		log.Error("error getting artifact image ID", "err", err)
+	log.Info("setting up rootfs")
+	rootPath := filepath.Join("/var/lib/flynn/image/mnt", job.ID)
+	if err := os.MkdirAll(rootPath, 0755); err != nil {
+		log.Error("error setting up rootfs", "err", err)
 		return err
 	}
-
-	var rootPath string
-	switch job.ImageArtifact.Type {
-	case host.ArtifactTypeDocker:
-		log.Info("pulling image")
-		artifactURI, err := l.resolveDiscoverdURI(job.ImageArtifact.URI)
-		if err != nil {
-			log.Error("error resolving artifact URI", "err", err)
-			return err
-		}
-		// TODO(lmars): stream pull progress (maybe to the app log?)
-		imageID, err = l.pinkerton.PullDocker(artifactURI, ioutil.Discard)
-		if err != nil {
-			log.Error("error pulling image", "err", err)
-			return err
-		}
-
-		log.Info("checking out image")
-		// creating an AUFS mount can fail intermittently with EINVAL, so try a
-		// few times (see https://github.com/flynn/flynn/issues/2044)
-		for start := time.Now(); time.Since(start) < time.Second; time.Sleep(50 * time.Millisecond) {
-			rootPath, err = l.pinkerton.Checkout(job.ID, imageID)
-			if err == nil || !strings.HasSuffix(err.Error(), "invalid argument") {
-				break
-			}
-		}
-		if err != nil {
-			log.Error("error checking out image", "err", err)
-			return err
-		}
-	case host.ArtifactTypeFlynn:
-		rootPath, err = l.imageRepo.Checkout(imageID)
-		if err != nil {
-			log.Error("error checking out image", "err", err)
-			return err
-		}
-	}
-
-	log.Info("reading image config")
-	imageConfig, err := readDockerImageConfig(imageID)
+	mounts, err := l.setupMounts(job)
 	if err != nil {
-		log.Error("error reading image config", "err", err)
+		log.Error("error setting up rootfs", "err", err)
 		return err
 	}
+	// TODO: cleanup overlays error
 
 	container.RootPath = rootPath
 
@@ -472,7 +436,7 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 			"/proc/sys", "/proc/sysrq-trigger", "/proc/irq", "/proc/bus",
 		},
 		Devices: configs.DefaultAutoCreatedDevices,
-		Mounts: []*configs.Mount{
+		Mounts: append([]*configs.Mount{
 			{
 				Source:      "proc",
 				Destination: "/proc",
@@ -511,7 +475,7 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 				Device:      "cgroup",
 				Flags:       defaultMountFlags | syscall.MS_RDONLY,
 			},
-		},
+		}, mounts...),
 	}
 
 	if spec, ok := job.Resources[resource.TypeMaxFD]; ok && spec.Limit != nil && spec.Request != nil {
@@ -556,13 +520,13 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 		return err
 	}
 
-	addBindMount(config, l.InitPath, "/.containerinit", false)
-	addBindMount(config, l.resolvConf, "/etc/resolv.conf", false)
+	addBindMount(config.Mounts, l.InitPath, "/.containerinit", false)
+	addBindMount(config.Mounts, l.resolvConf, "/etc/resolv.conf", false)
 	for _, m := range job.Config.Mounts {
 		if m.Target == "" {
 			return errors.New("host: invalid empty mount target")
 		}
-		addBindMount(config, m.Target, m.Location, m.Writeable)
+		addBindMount(config.Mounts, m.Target, m.Location, m.Writeable)
 	}
 
 	// apply volumes
@@ -573,7 +537,7 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 			log.Error("missing required volume", "volumeID", v.VolumeID, "err", err)
 			return err
 		}
-		addBindMount(config, vol.Location(), v.Target, v.Writeable)
+		addBindMount(config.Mounts, vol.Location(), v.Target, v.Writeable)
 	}
 
 	// mutating job state, take state write lock
@@ -614,24 +578,13 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 		initConfig.IP = container.IP.String() + "/24"
 		initConfig.Gateway = l.bridgeAddr.String()
 	}
-	if initConfig.WorkDir == "" {
-		initConfig.WorkDir = imageConfig.WorkingDir
-	}
 	if job.Config.Uid > 0 {
 		initConfig.User = strconv.Itoa(job.Config.Uid)
-	} else if imageConfig.User != "" {
-		// TODO: check and lookup user from image config
 	}
+	// TODO: make Entrypoint required
 	if len(job.Config.Entrypoint) > 0 {
 		initConfig.Args = job.Config.Entrypoint
 		initConfig.Args = append(initConfig.Args, job.Config.Cmd...)
-	} else {
-		initConfig.Args = imageConfig.Entrypoint
-		if len(job.Config.Cmd) > 0 {
-			initConfig.Args = append(initConfig.Args, job.Config.Cmd...)
-		} else {
-			initConfig.Args = append(initConfig.Args, imageConfig.Cmd...)
-		}
 	}
 	for _, port := range job.Config.Ports {
 		initConfig.Ports = append(initConfig.Ports, port)
@@ -716,6 +669,141 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 
 	log.Info("job started")
 	return nil
+}
+
+func (l *LibcontainerBackend) setupMounts(job *host.Job) ([]*configs.Mount, error) {
+	paths := make(map[string][]string, len(job.Mountspecs))
+	for _, spec := range job.Mountspecs {
+		var path string
+		switch spec.Type {
+		case host.MountspecTypeSquashfs:
+			var err error
+			path, err = l.mountSquashfs(spec)
+			if err != nil {
+				return nil, err
+			}
+		case host.MountspecTypeTmp:
+			path = filepath.Join("/var/lib/flynn/image/tmp", spec.ID)
+			if err := os.MkdirAll(path, 0755); err != nil {
+				return nil, err
+			}
+		}
+		if _, ok := paths[spec.Mountpoint]; ok {
+			paths[spec.Mountpoint] = append(paths[spec.Mountpoint], path)
+		} else {
+			paths[spec.Mountpoint] = []string{path}
+		}
+	}
+
+	mounts := make([]*configs.Mount, 0, len(paths))
+	for path, layers := range paths {
+		if len(layers) == 1 {
+			// TODO: use spec.Writeable?
+			addBindMount(mounts, layers[0], path, true)
+			continue
+		}
+		dirs := make([]string, len(layers))
+		for i, layer := range layers {
+			// append mount paths in reverse order as overlay
+			// lower dirs are stacked from right to left
+			dirs[len(layers)-i-1] = layer
+		}
+		workDir := filepath.Join("/var/lib/flynn/image/tmp", "work-"+random.UUID())
+		if err := os.Mkdir(workDir, 0755); err != nil {
+			return nil, err
+		}
+		// TODO: cleanup the workDir on umount
+		mounts = append(mounts, &configs.Mount{
+			Source:      "overlay",
+			Destination: path,
+			Device:      "overlay",
+			Data:        fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", strings.Join(dirs[1:], ":"), dirs[0], workDir),
+		})
+	}
+	return mounts, nil
+}
+
+func (l *LibcontainerBackend) mountSquashfs(m *host.Mountspec) (string, error) {
+	src := filepath.Join("/var/lib/flynn/image/layers", m.ID)
+	if _, err := os.Stat(src); err != nil {
+		// TODO: download if not exists
+		return "", err
+	}
+
+	dst := filepath.Join("/var/lib/flynn/image/mnt", m.ID)
+	if mounted, err := isMounted(dst); err != nil {
+		return "", err
+	} else if mounted {
+		return dst, nil
+	}
+	if err := os.MkdirAll(dst, 0700); err != nil {
+		return "", err
+	}
+
+	loopDev, err := loopMount(src)
+	if err != nil {
+		return "", err
+	}
+
+	if err := syscall.Mount(loopDev, dst, "squashfs", 0, ""); err != nil {
+		return "", err
+	}
+	return dst, nil
+}
+
+func isMounted(path string) (bool, error) {
+	f, err := os.Open("/proc/self/mountinfo")
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		fields := strings.Split(s.Text(), " ")
+		if fields[4] == path {
+			return true, nil
+		}
+	}
+	return false, s.Err()
+}
+
+const (
+	LOOP_CTL_GET_FREE = 0x4C82
+	LOOP_SET_FD       = 0x4C00
+)
+
+func loopMount(src string) (string, error) {
+	ctrl, err := os.OpenFile("/dev/loop-control", os.O_RDWR, 0)
+	if err != nil {
+		return "", err
+	}
+	defer ctrl.Close()
+
+	index, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ctrl.Fd(), uintptr(LOOP_CTL_GET_FREE), 0)
+	if errno != 0 {
+		return "", fmt.Errorf("error allocating loop device: %s", err)
+	}
+	path := fmt.Sprintf("/dev/loop%d", index)
+
+	loop, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return "", err
+	}
+	defer loop.Close()
+
+	f, err := os.OpenFile(src, os.O_RDWR, 0)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	_, _, errno = syscall.Syscall(syscall.SYS_IOCTL, loop.Fd(), uintptr(LOOP_SET_FD), f.Fd())
+	if errno != 0 {
+		return "", fmt.Errorf("error setting loop device backing file: %s", err)
+	}
+
+	return path, nil
 }
 
 // resolveDiscoverdURI resolves a discoverd host in the given URI to an address
@@ -1251,12 +1339,12 @@ func (l *LibcontainerBackend) CloseLogs() (host.LogBuffers, error) {
 	return buffers, nil
 }
 
-func addBindMount(config *configs.Config, src, dest string, writeable bool) {
+func addBindMount(mounts []*configs.Mount, src, dest string, writeable bool) {
 	flags := syscall.MS_BIND | syscall.MS_REC
 	if !writeable {
 		flags |= syscall.MS_RDONLY
 	}
-	config.Mounts = append(config.Mounts, &configs.Mount{
+	mounts = append(mounts, &configs.Mount{
 		Source:      src,
 		Destination: dest,
 		Device:      "bind",

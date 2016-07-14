@@ -1,11 +1,15 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 
 	"github.com/docker/docker/pkg/archive"
+	ct "github.com/flynn/flynn/controller/types"
 	"github.com/flynn/flynn/host/image"
 	"github.com/flynn/flynn/pinkerton"
 )
@@ -14,7 +18,7 @@ func main() {
 	log.SetFlags(0)
 
 	if len(os.Args) != 2 {
-		log.Fatalf("usage: %s IMAGE", os.Args[0])
+		log.Fatalf("usage: %s NAME", os.Args[0])
 	}
 	if err := build(os.Args[1]); err != nil {
 		log.Fatalln("ERROR:", err)
@@ -22,6 +26,13 @@ func main() {
 }
 
 func build(name string) error {
+	cmd := exec.Command("docker", "build", "-t", name, ".")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error building docker image: %s", err)
+	}
+
 	context, err := pinkerton.BuildContext("aufs", "/var/lib/docker")
 	if err != nil {
 		return err
@@ -52,31 +63,35 @@ func (b *Builder) Build(name string) error {
 	}
 
 	ids := make([]string, 0, len(history))
-	var parent *image.Image
+	layers := make([]*ct.ImageLayer, 0, len(history))
 	for i := len(history) - 1; i >= 0; i-- {
 		layer := history[i]
 		ids = append(ids, layer.ID)
 		if len(layer.Tags) > 0 {
-			image, err := b.CreateImage(ids, parent)
+			l, err := b.CreateLayer(ids)
 			if err != nil {
 				return err
 			}
 			ids = make([]string, 0, len(history))
-			parent = image
+			layers = append(layers, l)
 		}
 	}
 
-	return nil
-}
-
-func (b *Builder) CreateImage(ids []string, parent *image.Image) (*image.Image, error) {
-	imageID := ids[len(ids)-1]
-
-	if image, _ := b.repo.Lookup(imageID); image != nil {
-		return image, nil
+	image := &ct.ImageManifest{
+		Type: ct.ImageManifestTypeV1,
+		Rootfs: []*ct.ImageRootfs{{
+			Platform: ct.DefaultImagePlatform,
+			Layers:   layers,
+		}},
 	}
 
-	dir, err := ioutil.TempDir("", "flynn-image-")
+	return json.NewEncoder(os.Stdout).Encode(image)
+}
+
+func (b *Builder) CreateLayer(ids []string) (*ct.ImageLayer, error) {
+	// TODO: don't create the layer if it already exists
+
+	dir, err := ioutil.TempDir("", "docker-layer-")
 	if err != nil {
 		return nil, err
 	}
@@ -96,5 +111,5 @@ func (b *Builder) CreateImage(ids []string, parent *image.Image) (*image.Image, 
 		}
 	}
 
-	return b.repo.CreateImage(dir, imageID, parent)
+	return b.repo.CreateLayer(dir)
 }

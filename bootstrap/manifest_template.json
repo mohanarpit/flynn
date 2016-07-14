@@ -42,7 +42,7 @@
     },
     "artifact": {
       "type": "flynn",
-      "uri": "$image_repository?name=flynn/discoverd&id=$image_id[discoverd]"
+      "manifest": $image_manifest[discoverd]
     },
     "processes": {
       "app": 1

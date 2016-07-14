@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -46,14 +47,16 @@ func manifest(args *docopt.Args) {
 		log.Fatal(err)
 	}
 
-	if err := interpolateManifest(lookup, args.String["--image-repository"], src, dest); err != nil {
+	if err := interpolateManifest(lookup, args.String["--image-dir"], args.String["--image-repository"], src, dest); err != nil {
 		log.Fatal(err)
 	}
 }
 
 var imageIDPattern = regexp.MustCompile(`\$image_id\[[^\]]+\]`)
 
-func interpolateManifest(lookup idLookupFunc, imageRepository string, src io.Reader, dest io.Writer) error {
+var imageManifestPattern = regexp.MustCompile(`\$image_manifest\[[^\]]+\]`)
+
+func interpolateManifest(lookup idLookupFunc, imageDir, imageRepository string, src io.Reader, dest io.Writer) error {
 	manifest, err := ioutil.ReadAll(src)
 	if err != nil {
 		return err
@@ -74,6 +77,14 @@ func interpolateManifest(lookup idLookupFunc, imageRepository string, src io.Rea
 				panic(err)
 			}
 			return res
+		})
+		manifest = imageManifestPattern.ReplaceAllFunc(manifest, func(raw []byte) []byte {
+			name := string(raw[16 : len(raw)-1])
+			data, err := ioutil.ReadFile(filepath.Join(imageDir, name+".json"))
+			if err != nil {
+				panic(err)
+			}
+			return data
 		})
 	}()
 	if replaceErr != nil {

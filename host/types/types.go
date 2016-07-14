@@ -13,6 +13,8 @@ const TagPrefix = "tag:"
 type Job struct {
 	ID string `json:"id,omitempty"`
 
+	Mountspecs []*Mountspec `json:"mountspecs,omitempty"`
+
 	Metadata map[string]string `json:"metadata,omitempty"`
 
 	ImageArtifact *Artifact          `json:"artifact,omitempty"`
@@ -66,6 +68,20 @@ func (j *Job) Dup() *Job {
 	}
 
 	return &job
+}
+
+type MountspecType string
+
+const (
+	MountspecTypeSquashfs MountspecType = "squashfs"
+	MountspecTypeTmp      MountspecType = "tmp"
+)
+
+type Mountspec struct {
+	Type       MountspecType `json:"type,omitempty"`
+	ID         string        `json:"id,omitempty"`
+	Mountpoint string        `json:"mountpoint,omitempty"`
+	URL        string        `json:"url,omitempty,omitempty"`
 }
 
 type JobResources struct {
