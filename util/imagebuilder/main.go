@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/docker/docker/pkg/archive"
@@ -67,6 +68,11 @@ type Builder struct {
 }
 
 func (b *Builder) Build(name string) error {
+	image, err := b.context.LookupImage(name)
+	if err != nil {
+		return err
+	}
+
 	history, err := b.context.History(name)
 	if err != nil {
 		return err
@@ -87,15 +93,29 @@ func (b *Builder) Build(name string) error {
 		}
 	}
 
-	image := &ct.ImageManifest{
-		Type: ct.ImageManifestTypeV1,
+	entrypoint := &ct.ImageEntrypoint{
+		WorkingDir: image.Config.WorkingDir,
+		Env:        make(map[string]string, len(image.Config.Env)),
+		Args:       append(image.Config.Entrypoint.Slice(), image.Config.Cmd.Slice()...),
+	}
+	for _, env := range image.Config.Env {
+		keyVal := strings.SplitN(env, "=", 2)
+		if len(keyVal) != 2 {
+			continue
+		}
+		entrypoint.Env[keyVal[0]] = keyVal[1]
+	}
+
+	manifest := &ct.ImageManifest{
+		Type:        ct.ImageManifestTypeV1,
+		Entrypoints: map[string]*ct.ImageEntrypoint{"_default": entrypoint},
 		Rootfs: []*ct.ImageRootfs{{
 			Platform: ct.DefaultImagePlatform,
 			Layers:   layers,
 		}},
 	}
 
-	return json.NewEncoder(os.Stdout).Encode(image)
+	return json.NewEncoder(os.Stdout).Encode(manifest)
 }
 
 // CreateLayer creates a squashfs layer from a docker layer ID chain by

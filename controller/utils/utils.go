@@ -16,7 +16,23 @@ import (
 
 func JobConfig(f *ct.ExpandedFormation, name, hostID string, uuid string) *host.Job {
 	t := f.Release.Processes[name]
-	env := make(map[string]string, len(f.Release.Env)+len(t.Env)+4)
+
+	var manifest *ct.ImageManifest
+	var entrypoint ct.ImageEntrypoint
+	// TODO: fetch the manifest if it isn't cached
+	if f.ImageArtifact != nil && f.ImageArtifact.Manifest != nil {
+		manifest = f.ImageArtifact.Manifest
+		if e, ok := manifest.Entrypoints[name]; ok {
+			entrypoint = *e
+		} else if e := manifest.DefaultEntrypoint(); e != nil {
+			entrypoint = *e
+		}
+	}
+
+	env := make(map[string]string, len(entrypoint.Env)+len(f.Release.Env)+len(t.Env)+5)
+	for k, v := range entrypoint.Env {
+		env[k] = v
+	}
 	for k, v := range f.Release.Env {
 		env[k] = v
 	}
@@ -29,7 +45,7 @@ func JobConfig(f *ct.ExpandedFormation, name, hostID string, uuid string) *host.
 	env["FLYNN_RELEASE_ID"] = f.Release.ID
 	env["FLYNN_PROCESS_TYPE"] = name
 	env["FLYNN_JOB_ID"] = id
-	metadata := make(map[string]string, len(f.App.Meta)+4)
+	metadata := make(map[string]string, len(f.App.Meta)+5)
 	for k, v := range f.App.Meta {
 		metadata[k] = v
 	}
@@ -42,21 +58,23 @@ func JobConfig(f *ct.ExpandedFormation, name, hostID string, uuid string) *host.
 		ID:       id,
 		Metadata: metadata,
 		Config: host.ContainerConfig{
-			Cmd:         t.Cmd,
+			Args:        entrypoint.Args,
 			Env:         env,
+			WorkingDir:  entrypoint.WorkingDir,
 			HostNetwork: t.HostNetwork,
 		},
 		Resurrect: t.Resurrect,
 		Resources: t.Resources,
 	}
+	if manifest != nil {
+		SetupMountspecs(job, manifest)
+	}
+	if len(t.Args) > 0 {
+		job.Config.Args = t.Args
+	}
+	// TODO: add entrypoint.LinuxCapabilities
 	if f.App.Meta["flynn-system-app"] == "true" {
 		job.Partition = "system"
-	}
-	if len(t.Entrypoint) > 0 {
-		job.Config.Entrypoint = t.Entrypoint
-	}
-	if f.ImageArtifact != nil {
-		job.ImageArtifact = f.ImageArtifact.HostArtifact()
 	}
 	if len(f.FileArtifacts) > 0 {
 		job.FileArtifacts = make([]*host.Artifact, len(f.FileArtifacts))
@@ -71,6 +89,29 @@ func JobConfig(f *ct.ExpandedFormation, name, hostID string, uuid string) *host.
 		job.Config.Ports[i].Service = p.Service
 	}
 	return job
+}
+
+func SetupMountspecs(job *host.Job, manifest *ct.ImageManifest) {
+	if len(manifest.Rootfs) == 0 {
+		return
+	}
+	// TODO: handle multiple rootfs entries
+	rootfs := manifest.Rootfs[0]
+	job.Mountspecs = make([]*host.Mountspec, len(rootfs.Layers)+1)
+	for i, layer := range rootfs.Layers {
+		// TODO: don't expect layers to always be squashfs
+		// TODO: set Mountspec.URL
+		job.Mountspecs[i] = &host.Mountspec{
+			Type:       host.MountspecTypeSquashfs,
+			ID:         layer.Hashes["sha512"],
+			Mountpoint: layer.Mountpoint,
+		}
+	}
+	job.Mountspecs[len(rootfs.Layers)] = &host.Mountspec{
+		Type:       host.MountspecTypeTmp,
+		ID:         job.ID,
+		Mountpoint: "/",
+	}
 }
 
 func ProvisionVolume(h VolumeCreator, job *host.Job) error {

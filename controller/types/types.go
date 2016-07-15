@@ -475,9 +475,13 @@ type ImageManifest struct {
 	Rootfs      []*ImageRootfs              `json:"rootfs,omitempty"`
 }
 
+func (m *ImageManifest) DefaultEntrypoint() *ImageEntrypoint {
+	return m.Entrypoints["_default"]
+}
+
 type ImageEntrypoint struct {
 	Env               map[string]string `json:"env,omitempty"`
-	WorkDir           string            `json:"cwd,omitempty"`
+	WorkingDir        string            `json:"cwd,omitempty"`
 	Args              []string          `json:"args,omitempty"`
 	LinuxCapabilities []string          `json:"linux_capabilities,omitempty"`
 }

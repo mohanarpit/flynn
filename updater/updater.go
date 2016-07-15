@@ -199,6 +199,7 @@ func deployApp(client controller.Client, app *ct.App, uri string, updateFn updat
 		if err != nil {
 			return err
 		}
+		// TODO: use artifact metadata to setermine slugrunner image
 		if u.Query().Get("name") != "flynn/slugrunner" {
 			return errDeploySkipped{"app not using slugrunner image"}
 		}

@@ -17,7 +17,6 @@ type Job struct {
 
 	Metadata map[string]string `json:"metadata,omitempty"`
 
-	ImageArtifact *Artifact          `json:"artifact,omitempty"`
 	FileArtifacts []*Artifact        `json:"file_artifacts,omitempty"`
 	Resources     resource.Resources `json:"resources,omitempty"`
 	Partition     string             `json:"partition,omitempty"`

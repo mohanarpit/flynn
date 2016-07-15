@@ -295,9 +295,9 @@ func (h *jobAPI) AddJob(w http.ResponseWriter, r *http.Request, ps httprouter.Pa
 		httphelper.Error(w, err)
 		return
 	}
-	if job.ImageArtifact == nil {
-		log.Warn("rejecting job as no ImageArtifact set")
-		httphelper.ValidationError(w, "ImageArtifact", "must be set")
+	if len(job.Mountspecs) == 0 {
+		log.Warn("rejecting job as no mountspecs set")
+		httphelper.ValidationError(w, "mountspecs", "must be set")
 		return
 	}
 

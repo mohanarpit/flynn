@@ -127,7 +127,11 @@ Options:
 		job.Resources = sb.Resources
 	}
 
-	cmd := exec.Job(exec.DockerImage(os.Getenv("SLUGBUILDER_IMAGE_URI")), job)
+	builderArtifact, err := client.GetArtifact(os.Getenv("SLUGBUILDER_ARTIFACT_ID"))
+	if err != nil {
+		return fmt.Errorf("Error getting slugbuilder artifact: %s", err)
+	}
+	cmd := exec.Job(builderArtifact, job)
 	var output bytes.Buffer
 	cmd.Stdout = io.MultiWriter(os.Stdout, &output)
 	cmd.Stderr = os.Stderr
@@ -158,11 +162,6 @@ Options:
 
 	fmt.Printf("-----> Creating release...\n")
 
-	artifact := &ct.Artifact{Type: host.ArtifactTypeDocker, URI: os.Getenv("SLUGRUNNER_IMAGE_URI")}
-	if err := client.CreateArtifact(artifact); err != nil {
-		return fmt.Errorf("Error creating image artifact: %s", err)
-	}
-
 	slugArtifact := &ct.Artifact{
 		Type: host.ArtifactTypeFile,
 		URI:  slugURL,
@@ -173,7 +172,7 @@ Options:
 	}
 
 	release := &ct.Release{
-		ArtifactIDs: []string{artifact.ID, slugArtifact.ID},
+		ArtifactIDs: []string{os.Getenv("SLUGRUNNER_ARTIFACT_ID"), slugArtifact.ID},
 		Env:         prevRelease.Env,
 		Meta:        prevRelease.Meta,
 	}
