@@ -560,6 +560,7 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 	l.state.mtx.Unlock()
 
 	initConfig := &containerinit.Config{
+		Args:          job.Config.Args,
 		TTY:           job.Config.TTY,
 		OpenStdin:     job.Config.Stdin,
 		WorkDir:       job.Config.WorkingDir,
@@ -572,11 +573,6 @@ func (l *LibcontainerBackend) Run(job *host.Job, runConfig *RunConfig, rateLimit
 	}
 	if job.Config.Uid > 0 {
 		initConfig.User = strconv.Itoa(job.Config.Uid)
-	}
-	// TODO: make Entrypoint required
-	if len(job.Config.Entrypoint) > 0 {
-		initConfig.Args = job.Config.Entrypoint
-		initConfig.Args = append(initConfig.Args, job.Config.Cmd...)
 	}
 	for _, port := range job.Config.Ports {
 		initConfig.Ports = append(initConfig.Ports, port)

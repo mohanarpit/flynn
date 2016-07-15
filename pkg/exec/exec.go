@@ -20,11 +20,10 @@ type Cmd struct {
 	TTY    bool
 	Meta   map[string]string
 
-	Entrypoint []string
+	Args []string
 
 	ImageArtifact host.Artifact
 
-	Cmd []string
 	Env map[string]string
 
 	Stdin io.Reader
@@ -192,11 +191,10 @@ func (c *Cmd) Start() error {
 		c.Job = &host.Job{
 			ImageArtifact: &c.ImageArtifact,
 			Config: host.ContainerConfig{
-				Entrypoint: c.Entrypoint,
-				Cmd:        c.Cmd,
-				TTY:        c.TTY,
-				Env:        c.Env,
-				Stdin:      c.Stdin != nil || c.stdinPipe != nil,
+				Args:  c.Args,
+				TTY:   c.TTY,
+				Env:   c.Env,
+				Stdin: c.Stdin != nil || c.stdinPipe != nil,
 			},
 			Metadata: c.Meta,
 		}

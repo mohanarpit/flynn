@@ -1207,7 +1207,7 @@ func (s *CLISuite) TestSlugReleaseGarbageCollection(t *c.C) {
 		release := &ct.Release{
 			ArtifactIDs: []string{imageArtifact.ID, r.slug.ID},
 			Processes: map[string]ct.ProcessType{
-				"app": {Cmd: []string{"/bin/pingserv"}, Ports: []ct.Port{{Proto: "tcp"}}},
+				"app": {Args: []string{"/bin/pingserv"}, Ports: []ct.Port{{Proto: "tcp"}}},
 			},
 		}
 		t.Assert(client.CreateRelease(release), c.IsNil)
@@ -1331,7 +1331,7 @@ func (s *CLISuite) TestDockerPush(t *c.C) {
 	if !ok {
 		t.Fatal(`release missing "app" process type`)
 	}
-	t.Assert(proc.Cmd, c.DeepEquals, []string{"/bin/pingserv"})
+	t.Assert(proc.Args, c.DeepEquals, []string{"/bin/pingserv"})
 
 	// check the release can be scaled up
 	t.Assert(flynn(t, "/", "-a", app.Name, "scale", "app=1"), Succeeds)

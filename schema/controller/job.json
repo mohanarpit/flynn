@@ -38,8 +38,8 @@
       "type": "string",
       "enum": ["pending", "starting", "up", "down", "crashed", "failed"]
     },
-    "cmd": {
-      "$ref": "/schema/controller/common#/definitions/cmd"
+    "args": {
+      "$ref": "/schema/controller/common#/definitions/args"
     },
     "meta": {
       "$ref": "/schema/controller/common#/definitions/meta"

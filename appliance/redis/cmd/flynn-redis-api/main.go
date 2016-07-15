@@ -201,12 +201,12 @@ func (h *Handler) servePostCluster(w http.ResponseWriter, req *http.Request, _ h
 		Meta:        make(map[string]string),
 		Processes: map[string]ct.ProcessType{
 			"redis": {
+				Args: []string{"/bin/start-flynn-redis", "redis"},
 				Ports: []ct.Port{
 					{Port: 6379, Proto: "tcp"},
 					{Port: 6380, Proto: "tcp"},
 				},
 				Data:    true,
-				Cmd:     []string{"redis"},
 				Service: "redis",
 			},
 		},

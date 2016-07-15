@@ -271,11 +271,8 @@ func runReleaseUpdate(args *docopt.Args, client controller.Client) error {
 				continue
 			}
 
-			if len(procUpdate.Cmd) > 0 {
-				procRelease.Cmd = procUpdate.Cmd
-			}
-			if len(procUpdate.Entrypoint) > 0 {
-				procRelease.Entrypoint = procUpdate.Entrypoint
+			if len(procUpdate.Args) > 0 {
+				procRelease.Args = procUpdate.Args
 			}
 			for key, value := range procUpdate.Env {
 				procRelease.Env[key] = value

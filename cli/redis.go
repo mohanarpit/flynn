@@ -76,7 +76,7 @@ func getRedisRunConfig(client controller.Client, app string, appRelease *ct.Rele
 		App:        app,
 		Release:    redisRelease.ID,
 		Env:        make(map[string]string),
-		Args:       []string{"-h", redisApp + ".discoverd", "-a", appRelease.Env["REDIS_PASSWORD"]},
+		Args:       []string{"redis-cli", "-h", redisApp + ".discoverd", "-a", appRelease.Env["REDIS_PASSWORD"]},
 		DisableLog: true,
 		Exit:       true,
 	}
@@ -85,9 +85,9 @@ func getRedisRunConfig(client controller.Client, app string, appRelease *ct.Rele
 }
 
 func runRedisCLI(args *docopt.Args, client controller.Client, config *runConfig) error {
-	config.Entrypoint = []string{"redis-cli"}
 	config.Env["PAGER"] = "less"
 	config.Env["LESS"] = "--ignore-case --LONG-PROMPT --SILENT --tabs=4 --quit-if-one-screen --no-init --quit-at-eof"
+	config.Args = append([]string{"redis-cli"}, config.Args...)
 	config.Args = append(config.Args, args.All["<argument>"].([]string)...)
 	return runJob(client, *config)
 }
@@ -114,7 +114,7 @@ func runRedisDump(args *docopt.Args, client controller.Client, config *runConfig
 		config.Stdout = io.MultiWriter(config.Stdout, bar)
 	}
 
-	config.Entrypoint = []string{"/bin/dump-flynn-redis"}
+	config.Args[0] = "/bin/dump-flynn-redis"
 	return runJob(client, *config)
 }
 
@@ -150,6 +150,6 @@ func runRedisRestore(args *docopt.Args, client controller.Client, config *runCon
 		config.Stdin = bar.NewProxyReader(config.Stdin)
 	}
 
-	config.Entrypoint = []string{"/bin/restore-flynn-redis"}
+	config.Args[0] = "/bin/restore-flynn-redis"
 	return runJob(client, *config)
 }

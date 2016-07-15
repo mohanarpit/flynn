@@ -21,7 +21,7 @@ import (
 
 func init() {
 	cmd := register("run", runRun, `
-usage: flynn run [-d] [-r <release>] [-e <entrypoint>] [-l] [--] <command> [<argument>...]
+usage: flynn run [-d] [-r <release>] [-l] [--] <command> [<argument>...]
 
 Run a job.
 
@@ -60,9 +60,6 @@ func runRun(args *docopt.Args, client controller.Client) error {
 		}
 		config.Release = release.ID
 	}
-	if e := args.String["-e"]; e != "" {
-		config.Entrypoint = []string{e}
-	}
 	return runJob(client, config)
 }
 
@@ -71,7 +68,6 @@ type runConfig struct {
 	Detached   bool
 	Release    string
 	ReleaseEnv bool
-	Entrypoint []string
 	Args       []string
 	Env        map[string]string
 	Stdin      io.Reader
@@ -83,10 +79,9 @@ type runConfig struct {
 
 func runJob(client controller.Client, config runConfig) error {
 	req := &ct.NewJob{
-		Cmd:        config.Args,
+		Args:       config.Args,
 		TTY:        config.Stdin == nil && config.Stdout == nil && term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd()) && !config.Detached,
 		ReleaseID:  config.Release,
-		Entrypoint: config.Entrypoint,
 		Env:        config.Env,
 		ReleaseEnv: config.ReleaseEnv,
 		DisableLog: config.DisableLog,

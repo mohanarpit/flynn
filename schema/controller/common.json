@@ -20,14 +20,8 @@
         "$ref": "#/definitions/id"
       }
     },
-    "cmd": {
-      "description": "shell command",
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "entrypoint": {
+    "args": {
+      "description": "command line arguments",
       "type": "array",
       "items": {
         "type": "string"
